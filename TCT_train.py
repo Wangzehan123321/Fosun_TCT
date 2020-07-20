@@ -20,7 +20,7 @@ class Visualizer(object):
         x=self.index.get(name,0)
         self.vis.text(text,win=name,append=False if x==0 else True,**kwargs)
         self.index[name]=x+1
-vis=Visualizer("TCT_class")
+vis=Visualizer("TCT_class_augment_balance_focial")
 
 
 # step1: 模型
@@ -43,8 +43,10 @@ if use_gpu:
 from TCT_dataset import TCTDataset
 batch_size=64
 num_workers=8
-trSet = TCTDataset("/home/wangzehan/TCT_data/data_process/train", train=True)
-valSet = TCTDataset("/home/wangzehan/TCT_data/data_process/val", train=False)
+#trSet = TCTDataset("/home/wangzehan/TCT_data/data_process/train", train=True)
+trSet = TCTDataset("/home/wangzehan/TCT_data/data_augment/train",balance=True,train=True)
+#valSet = TCTDataset("/home/wangzehan/TCT_data/data_process/val", train=False)
+valSet = TCTDataset("/home/wangzehan/TCT_data/data_augment/val", train=False)
 trainDataloader = DataLoader(trSet, batch_size,
                               shuffle=True,
                               num_workers=num_workers)
@@ -53,13 +55,21 @@ valDataloader = DataLoader(valSet, batch_size,
                             num_workers=num_workers)
 
 # step3: 目标函数和优化器
-criterion = torch.nn.CrossEntropyLoss()
+focial_use=True
+if focial_use:
+    criterion=torch.nn.CrossEntropyLoss(reduction="none")
+else:
+    criterion = torch.nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters())#先使用默认学习率
 
 # # 训练
 max_epoch=100
 use_gpu=True
 for epoch_num in range(max_epoch):
+    #为了与balance相匹配，因为dataloader不会随着epoch的改变而改变，这样可以丰富数据
+    trainDataloader = DataLoader(trSet, batch_size,
+                                 shuffle=True,
+                                 num_workers=num_workers)
 
     avg_tr_loss = 0
     avg_tr_time = 0
@@ -72,7 +82,12 @@ for epoch_num in range(max_epoch):
             label = label.cuda()
         optimizer.zero_grad()
         score = model(image)
-        loss = criterion(score, label)
+        if focial_use:
+            loss_cr = criterion(score, label)
+            Pt = torch.exp(-loss_cr)
+            loss = torch.mean((1 - Pt) ** 2 * loss_cr)
+        else:
+            loss = criterion(score, label)
         loss.backward()
         optimizer.step()
         batch_time = time.time() - st_time
@@ -80,16 +95,16 @@ for epoch_num in range(max_epoch):
         avg_tr_time += batch_time
 
         # 每100次训练记录一次损失
-        if ii % 2 == 1:
-            eta = avg_tr_time / 2 * (len(trSet) / batch_size - ii)
+        if ii % 100 == 99:
+            eta = avg_tr_time / 100 * (len(trSet) / batch_size - ii)
             print("Epoch no:", epoch_num + 1, "| Epoch progress(%):",
-                  format(ii / (len(trSet) / batch_size) * 2, '0.2f'), "| Avg train loss:",
-                  format(avg_tr_loss / 2, '0.4f'),"| ETA(s):", int(eta))
+                  format(ii / (len(trSet) / batch_size) * 100, '0.2f'), "| Avg train loss:",
+                  format(avg_tr_loss / 100, '0.4f'),"| ETA(s):", int(eta))
             text = "Epoch no:" + str(epoch_num + 1) + "| Epoch progress(%):" + str(
-                ii / (len(trSet) / batch_size) * 2) + "| Avg train loss:" + str(
-                avg_tr_loss / 2) + "| ETA(s):" + str(int(eta))
+                ii / (len(trSet) / batch_size) * 100) + "| Avg train loss:" + str(
+                avg_tr_loss / 100) + "| ETA(s):" + str(int(eta))
             vis.txt(name="record", text=text)
-            vis.plot(name="loss", y=int(avg_tr_loss / 2))
+            vis.plot(name="loss", y=int(avg_tr_loss / 100))
 
     with torch.no_grad():
         print("Epoch",epoch_num+1,'complete. Calculating validation loss...')
@@ -106,7 +121,12 @@ for epoch_num in range(max_epoch):
 
             # Forward pass
             score = model(image)
-            loss = criterion(score, label)
+            if focial_use:
+                loss_cr=criterion(score, label)
+                Pt = torch.exp(-loss_cr)
+                loss = torch.mean((1 - Pt) ** 2 * loss_cr)
+            else:
+                loss = criterion(score, label)
 
             avg_val_loss += loss.item()
             val_batch_count += 1
@@ -121,5 +141,5 @@ for epoch_num in range(max_epoch):
         # val_loss.append(avg_val_loss/val_batch_count)
         # prev_val_loss = avg_val_loss/val_batch_count
     #__________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________
-    torch.save(model.state_dict(), '../TCT_trainedmodels/resnet18/cslstm_{}.tar'.format(str(epoch_num)))
+    torch.save(model.state_dict(), '../TCT_trainedmodels/resnet18_augment_balance_focial/cslstm_{}.tar'.format(str(epoch_num)))
 

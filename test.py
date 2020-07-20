@@ -16,3 +16,4 @@
 # for file in os.listdir(root_dir):
 #     l+=len(os.listdir(os.path.join(root_dir,file)))
 # print(l)
+print(1)
